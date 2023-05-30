@@ -1,13 +1,10 @@
-// SPDX-License-Identifier: AGPL-3.0
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.9;
 
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {SafeERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import {SafeERC20, IERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {IUniswapV2Factory} from "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
-import {IUniswapV2Pair} from "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
-import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
-import {ReentrancyGuard} from "../utils/ReentrancyGuard.sol";
+import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import {ICILStaking} from "./interfaces/ICILStaking.sol";
 
 /**
@@ -16,9 +13,8 @@ import {ICILStaking} from "./interfaces/ICILStaking.sol";
  * price decimals 8
  * percent decimals 2
  */
-contract NewMarketPlace is Ownable, ReentrancyGuard {
+contract NewMarketPlace is OwnableUpgradeable, ReentrancyGuardUpgradeable {
   using SafeERC20 for IERC20;
-
   struct PositionCreateParam {
     uint128 price;
     uint128 amount;
@@ -49,9 +45,6 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
     bool canceled;
   }
 
-  /// @notice multi sign wallet address of team
-  address public immutable multiSig;
-
   mapping(address => bool) public whitelists;
 
   /// @notice cil staking address
@@ -66,7 +59,8 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
   /// @notice offers (bytes32 => Offer)
   mapping(bytes32 => Offer) public offers;
   /// @notice fee decimals 2
-  uint256 public feePoint = 100;
+  uint256 public constant feePoint = 100;
+  uint256 public constant minCilAmount = 10 * 10**18;
 
   /// @notice blocked address
   mapping(address => bool) public isBlocked;
@@ -106,11 +100,11 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
   /// @notice fires when block account
   event AccountBlocked(address account);
 
-  /**
-   * @param multiSig_ multi sign wallet address
-   */
-  constructor(address multiSig_) {
-    multiSig = multiSig_;
+  function initialize(address cilStaking_) public initializer {
+    cilStaking = cilStaking_;
+
+    __Ownable_init();
+    __ReentrancyGuard_init();
   }
 
   modifier initialized() {
@@ -175,7 +169,7 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
    * @return totalAmount amount of staked cil with usd
    */
   function getStakedCil(address user) public view returns (uint256 totalAmount) {
-    totalAmount = (ICILStaking(cilStaking).lockableCil(user));
+    totalAmount = (ICILStaking(cilStaking).stakedCilAmount(user));
   }
 
   /**
@@ -222,10 +216,10 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
       IERC20(params.token).transferFrom(msg.sender, address(this), params.amount);
     }
 
-    uint256 lockableAmount = getStakedCil(msg.sender);
-    require(lockableAmount > params.amount, "MarketPlace: insufficient staking amount for offer");
+    uint256 lockedAmount = getStakedCil(msg.sender);
+    require(lockedAmount > minCilAmount, "MarketPlace: insufficient staking amount for offer");
 
-    ICILStaking(cilStaking).increaseLock(msg.sender, params.amount);
+    ICILStaking(cilStaking).lock(msg.sender, minCilAmount);
     require(ICILStaking(cilStaking).isVerified(msg.sender), "Not verified");
 
     emit PositionCreated(
@@ -255,22 +249,20 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
     validPosition(key)
     nonReentrant
   {
-    require(positions[key].creator == msg.sender, "MarketPlace: not owner of this position");
+    Position memory position = positions[key];
+    require(position.creator == msg.sender, "MarketPlace: not owner of this position");
 
-    positions[key].amount += amount;
+    position.amount += amount;
 
-    if (positions[key].token == address(0)) {
+    if (position.token == address(0)) {
       require(amount == msg.value, "MarketPlace: invalid eth amount");
     } else {
-      IERC20(positions[key].token).transferFrom(msg.sender, address(this), amount);
+      IERC20(position.token).transferFrom(msg.sender, address(this), amount);
     }
 
-    uint256 lockableAmount = getStakedCil(msg.sender);
-    require(lockableAmount > amount, "MarketPlace: insufficient staking amount for offer");
+    positions[key] = position;
 
-    ICILStaking(cilStaking).increaseLock(msg.sender, amount);
-
-    emit PositionUpdated(key, positions[key].amount, positions[key].offeredAmount);
+    emit PositionUpdated(key, position.amount, position.offeredAmount);
   }
 
   /**
@@ -285,23 +277,20 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
     validPosition(key)
     nonReentrant
   {
-    require(positions[key].creator == msg.sender, "MarketPlace: not owner of this position");
-    require(
-      positions[key].amount >= positions[key].offeredAmount + amount,
-      "MarketPlace: insufficient amount"
-    );
+    Position memory position = positions[key];
+    require(position.creator == msg.sender, "MarketPlace: not owner of this position");
+    require(position.amount >= position.offeredAmount + amount, "MarketPlace: insufficient amount");
 
-    positions[key].amount -= amount;
+    position.amount -= amount;
+    positions[key] = position;
 
-    ICILStaking(cilStaking).decreaseLock(msg.sender, amount);
-
-    if (positions[key].token == address(0)) {
+    if (position.token == address(0)) {
       payable(msg.sender).transfer(amount);
     } else {
-      IERC20(positions[key].token).transfer(msg.sender, amount);
+      IERC20(position.token).transfer(msg.sender, amount);
     }
 
-    emit PositionUpdated(key, positions[key].amount, positions[key].offeredAmount);
+    emit PositionUpdated(key, position.amount, position.offeredAmount);
   }
 
   /**
@@ -370,6 +359,11 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
 
     offer.released = true;
     position.amount -= offer.amount;
+
+    if (position.amount == 0) {
+      ICILStaking(cilStaking).remove(positions[key].creator);
+    }
+
     position.offeredAmount -= offer.amount;
 
     positions[positionKey] = position;
@@ -378,10 +372,10 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
     uint256 fee = (offer.amount * feePoint) / 10000;
     if (position.token == address(0)) {
       payable(offer.creator).transfer(offer.amount - fee);
-      payable(multiSig).transfer(fee);
+      payable(cilStaking).transfer(fee);
     } else {
       IERC20(position.token).transfer(offer.creator, offer.amount - fee);
-      IERC20(position.token).transfer(multiSig, fee);
+      IERC20(position.token).transfer(cilStaking, fee);
     }
 
     emit PositionUpdated(key, positions[key].amount, positions[key].offeredAmount);
@@ -392,7 +386,7 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
    * @dev set staking contract address
    * @param cilStaking_ staking contract address
    */
-  function init(address cilStaking_) external onlyOwner {
+  function setStakeAddress(address cilStaking_) external onlyOwner {
     cilStaking = cilStaking_;
   }
 
@@ -429,9 +423,9 @@ contract NewMarketPlace is Ownable, ReentrancyGuard {
     ICILStaking(cilStaking).remove(positions[key].creator);
 
     if (positions[key].token == address(0)) {
-      payable(multiSig).transfer(positionAmount);
+      payable(cilStaking).transfer(positionAmount);
     } else {
-      IERC20(positions[key].token).transfer(multiSig, positionAmount);
+      IERC20(positions[key].token).transfer(cilStaking, positionAmount);
     }
 
     emit PositionUpdated(key, positions[key].amount, positions[key].offeredAmount);

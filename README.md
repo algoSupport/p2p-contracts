@@ -83,3 +83,9 @@ Contracts are developed using well-known open-source software for utility librar
 [ethers.js](https://github.com/ethers-io/ethers.js/)
 
 [TypeChain](https://github.com/dethcrypto/TypeChain)
+
+Arbitrum Golier deployments:
+CIL address:  0xcE9007bbD935289c85689472e26FC67D410c9F5A
+NFT address: 0x9a4bfcB989dCa27764dC7e194D633b709e7Ee325
+Staking address:  0x871fd3Bfd6Ed57256DF75eBfA11ceC28E77e0156
+Marketplace address:  0xf3d1B89A39bfC20bF38b4c2cD72BBC1d1D5B1EA1

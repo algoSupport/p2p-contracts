@@ -14,41 +14,37 @@ import "hardhat-watcher";
 import "solidity-coverage";
 import "hardhat-storage-layout";
 import "dotenv/config";
+import "@openzeppelin/hardhat-upgrades";
 
 import "./tasks/account";
 import "./tasks/verify";
 import "./tasks/contracts";
 
 const config: HardhatUserConfig = {
-  defaultNetwork: "hardhat",
+  // defaultNetwork: "hardhat",
   networks: {
-    hardhat: {
-      chainId: 1337,
-      forking: {
-        enabled: process.env.FORKING_ENABLED === "true",
-        blockNumber: Number(process.env.FORKING_BLOCK_NUM) || undefined,
-        url: node_url("goerli"),
-      },
-      accounts: accounts("goerli"),
-      mining: {
-        auto: process.env.AUTO_MINING_ENABLED === "true",
-        // interval: Number(process.env.MINING_INTERVAL),
-      },
-    },
-    localhost: {
-      url: node_url("localhost"),
-      accounts: accounts("localhost"),
-      tags: ["local", "test"],
-    },
-    mainnet: {
-      url: node_url("mainnet"),
-      accounts: accounts("mainnet"),
-      tags: ["prod", "live"],
-    },
+    // hardhat: {
+    //   chainId: 1337,
+    //   forking: {
+    //     enabled: process.env.FORKING_ENABLED === "true",
+    //     blockNumber: Number(process.env.FORKING_BLOCK_NUM) || undefined,
+    //     url: node_url("goerli"),
+    //   },
+    //   accounts: accounts("goerli"),
+    //   mining: {
+    //     auto: process.env.AUTO_MINING_ENABLED === "true",
+    //     // interval: Number(process.env.MINING_INTERVAL),
+    //   },
+    // },
+    // localhost: {
+    //   // url: node_url("localhost"),
+    //   accounts: accounts("localhost"),
+    //   tags: ["local", "test"],
+    // },
+
     goerli: {
-      url: node_url("goerli"),
-      accounts: accounts("goerli"),
-      tags: ["test", "live"],
+      url: 'https://goerli-rollup.arbitrum.io/rpc',
+      accounts: [process.env.PRIVATE_KEY || ''],
     },
   },
   etherscan: {
